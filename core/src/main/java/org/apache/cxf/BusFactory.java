@@ -31,6 +31,7 @@ import java.util.logging.Logger;
 
 import org.apache.cxf.common.classloader.ClassLoaderUtils;
 import org.apache.cxf.common.logging.LogUtils;
+import org.apache.cxf.common.util.ConcurrentReferenceHashMap;
 import org.apache.cxf.common.util.SystemPropertyAction;
 
 /**
@@ -74,7 +75,7 @@ public abstract class BusFactory {
         volatile boolean stale;
     }
     
-    protected static final Map<Thread, BusHolder> THREAD_BUSSES = new WeakHashMap<Thread, BusHolder>();
+    protected static final Map<Thread, BusHolder> THREAD_BUSSES = new ConcurrentReferenceHashMap<>();
     protected static final ThreadLocal<BusHolder> THREAD_BUS = new ThreadLocal<BusHolder>();
 
     private static final Logger LOG = LogUtils.getL7dLogger(BusFactory.class);
@@ -120,12 +121,10 @@ public abstract class BusFactory {
             Thread cur = Thread.currentThread();
             h = THREAD_BUSSES.get(cur);
             if (h == null || h.stale) {
-                synchronized (THREAD_BUSSES) {
-                    h = THREAD_BUSSES.get(cur);
-                    if (h == null || h.stale) {
-                        h = new BusHolder();
-                        THREAD_BUSSES.put(cur, h);
-                    }
+                h = THREAD_BUSSES.get(cur);
+                if (h == null || h.stale) {
+                    h = new BusHolder();
+                    THREAD_BUSSES.put(cur, h);
                 }
             }
             if (set) {
@@ -161,9 +160,7 @@ public abstract class BusFactory {
             BusHolder h = THREAD_BUS.get();
             if (h == null) {
                 Thread cur = Thread.currentThread();
-                synchronized (THREAD_BUSSES) {
-                    h = THREAD_BUSSES.get(cur);
-                }
+                h = THREAD_BUSSES.get(cur);
             }
             if (h != null) {
                 h.bus = null;
@@ -187,9 +184,7 @@ public abstract class BusFactory {
             BusHolder b = THREAD_BUS.get();
             if (b == null) {
                 Thread cur = Thread.currentThread();
-                synchronized (THREAD_BUSSES) {
-                    b = THREAD_BUSSES.get(cur);
-                }
+                b = THREAD_BUSSES.get(cur);
             }
             if (b != null) {
                 Bus orig = b.bus;
@@ -232,9 +227,7 @@ public abstract class BusFactory {
         BusHolder h = THREAD_BUS.get();
         if (h == null || h.stale) {
             Thread cur = Thread.currentThread();
-            synchronized (THREAD_BUSSES) {
-                h = THREAD_BUSSES.get(cur);
-            }
+            h = THREAD_BUSSES.get(cur);
         }
         return h == null || h.stale ? null : h.bus;
     }
@@ -255,22 +248,20 @@ public abstract class BusFactory {
      * @param bus the bus to remove
      */
     public static void clearDefaultBusForAnyThread(final Bus bus) {
-        synchronized (THREAD_BUSSES) {
-            for (final Iterator<BusHolder> iterator = THREAD_BUSSES.values().iterator();
-                iterator.hasNext();) {
-                BusHolder itBus = iterator.next();
-                if (bus == null || itBus == null || itBus.bus == null
+        for (final Iterator<BusHolder> iterator = THREAD_BUSSES.values().iterator();
+             iterator.hasNext();) {
+            BusHolder itBus = iterator.next();
+            if (bus == null || itBus == null || itBus.bus == null
                     || itBus.stale
                     || bus.equals(itBus.bus)) {
-                    if (itBus != null) {
-                        itBus.bus = null;
-                        //mark as stale so if a thread asks again, it will create a new one
-                        itBus.stale = true;  
-                    }
-                    //This will remove the BusHolder from the only place that should
-                    //strongly reference it
-                    iterator.remove();
+                if (itBus != null) {
+                    itBus.bus = null;
+                    //mark as stale so if a thread asks again, it will create a new one
+                    itBus.stale = true;
                 }
+                //This will remove the BusHolder from the only place that should
+                //strongly reference it
+                iterator.remove();
             }
         }
     }
